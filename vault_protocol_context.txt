@@ -1,0 +1,55 @@
+Origin Protocol — OUSD/OETH Vault (VaultCore.sol + VaultAdmin.sol)
+
+ARCHITECTURE:
+Origin splits the Vault into two implementation contracts behind one proxy
+(VaultProxy) to work around Ethereum's contract size limit:
+  - VaultCore.sol: permissionless user-facing entry points — mint, mintMultiple,
+    redeem, redeemAll, allocate, rebase, checkBalance, totalValue,
+    calculateRedeemOutputs, getAssetCount, getAllAssets, getStrategyCount,
+    isSupportedAsset.
+  - VaultAdmin.sol: governance/strategist-gated configuration — supportAsset,
+    setAssetDefaultStrategy, approveStrategy, pauseRebase/pauseCapital, etc.
+Both share storage via VaultStorage. VaultCore reads state that VaultAdmin's
+gated functions write.
+
+HARD EXCLUSION FOR THIS RUN — DO NOT GENERATE THESE:
+Do not generate hypotheses where the precondition is "assume the Governor or
+Strategist key is malicious or compromised." This is explicitly out of scope
+per Immunefi's own program rules: "Impacts caused by attacks requiring access
+to privileged addresses (including, but not limited to: governance and
+strategist contracts) without additional modifications to the privileges
+attributed." VaultAdmin.sol's FILE is in scope to read — you need to
+understand what state it writes — but the attacker in your hypothesis must
+always be an arbitrary unprivileged address calling VaultCore's public/
+external functions.
+
+THE ACTUAL INTERESTING SURFACE: look for places where VaultCore.sol's
+permissionless functions (mint, redeem, allocate, rebase, checkBalance) make
+an assumption about state that VaultAdmin.sol controls (default strategies,
+supported assets, paused flags, trustee fee config) that can be violated
+or exploited by a normal market actor WITHOUT needing the admin to act
+maliciously — e.g. a state combination that's reachable through entirely
+legitimate governance actions (configured once, in the past, for ordinary
+reasons) but which VaultCore's current logic doesn't handle safely under
+some market condition.
+
+KNOWN PRIOR FINDING (already disclosed in past audits, therefore EXCLUDED
+under the blanket past-audits known-issues rule — do not re-derive this,
+but it's a useful pattern reference for the CLASS of bug that exists here):
+OpenZeppelin previously found that supportAsset() doesn't enforce a default
+strategy for a newly added asset. The asset can still be minted/redeemed via
+VaultCore but isn't deposited to any strategy, skewing the buffer/strategy
+investment ratio. Origin's response: "We'll keep this the way it is. This
+won't lose any funds if it's not set." — so this EXACT issue is dead, but it
+illustrates the pattern: VaultCore assuming "every supported asset has a
+configured default strategy" without VaultAdmin guaranteeing that invariant.
+Look for OTHER places this same class of assumption-mismatch could exist
+that wouldn't be dismissed the same way (i.e., where it DOES affect fund
+safety, not just buffer ratio skew).
+
+KNOWN-ISSUES CROSS-CHECK (already confirmed excluded, don't regenerate):
+- Attacks that only change the MIX of backing stablecoins without reducing
+  total backing — excluded.
+- Backing reductions from normal strategy fees or price differences during
+  legitimate strategist/governance asset moves — excluded.
+- Flipper contract rounding — excluded, intentional.

@@ -4,6 +4,20 @@ not estimate severity precisely. Generation and verification are different
 skills; verification happens later in a separate pass. Your job here is
 breadth and creativity within hard constraints, not rigor.
 
+# Severity bias — read this before generating anything
+
+The objective is CRITICAL severity: direct theft of funds, permanent freezing
+of funds, or protocol insolvency. Bias every category toward hypotheses that,
+if true, would be critical or high — not medium-severity griefing, not gas
+inefficiencies, not informational issues. A useful test before writing a
+hypothesis down: "if this is real, does it cause direct fund loss or
+insolvency, or does it just annoy someone / cost them a small amount of gas?"
+If it's the latter, it's probably not worth a slot. Medium-severity findings
+on well-trodden protocols are usually already found and duplicated many times
+over by other researchers — the goal here is to find what others are NOT
+looking at, which is more often in unusual state combinations and absence-of-
+action scenarios than in the standard "can this number overflow" checks.
+
 # Hard exclusions — do not generate ANY hypothesis in these categories
 
 - MEV / transaction ordering / sandwiching / front-running / back-running
@@ -34,13 +48,18 @@ Target file(s) you have read access to: {{TARGET_FILES}}
 Known constraints already established (don't waste cycles rediscovering these):
 {{KNOWN_CONSTRAINTS}}
 
-# Generation procedure — work through ALL SIX categories below, in order
+# Generation procedure — work through ALL SEVEN categories below, in order
 
 Do not skip a category because nothing comes to mind quickly. Spend real
-effort on each before moving to the next. Arithmetic/accounting is
-deliberately LAST — you have a documented pattern of defaulting to it
-first and stopping there. Categories 1-5 must be attempted with full
-effort before you're allowed to touch category 6.
+effort on each before moving to the next. Categories 1-5 and 7 are
+non-arithmetic and deliberately prioritized — you have a documented
+pattern of defaulting to arithmetic/accounting (category 6) first and
+stopping there, which produces medium-severity findings other researchers
+have likely already found. Attempt categories 1-5 with full effort before
+touching category 6, then do category 7 (liveness) regardless — it's a
+distinct failure class from anything in 1-5 and is commonly under-explored
+by other researchers, which is exactly the kind of target this pipeline
+is for.
 
 ## 1. Incentive misalignment / adversarial role-play
 For each permissionless role in the system (depositor, borrower, redeemer,
@@ -49,7 +68,10 @@ role's profit-maximizing action diverge from what the protocol assumes is
 "normal" behavior? Where does the protocol assume an actor will behave
 altruistically, lazily, or in a specific order, when nothing on-chain
 enforces that? Think about each role independently, then think about two
-roles colluding (e.g. depositor + liquidator are the same address).
+roles colluding (e.g. depositor + liquidator are the same address). A
+sharp test question: can a permissionless actor profit specifically BY
+DOING NOTHING — i.e. by refusing to perform an action the protocol's
+security model silently assumes someone, anyone, will eventually perform?
 
 ## 2. Cross-state / cross-epoch arbitrage
 Does the protocol have discrete states, epochs, snapshots, or rate updates?
@@ -83,11 +105,27 @@ values within the protocol's own configured bounds — under which a
 permissionless actor's expected profit from an action becomes positive
 when the protocol designer assumed it would be negative or neutral?
 
-## 6. Arithmetic / accounting (last, and only after 1-5)
+## 6. Arithmetic / accounting
 Standard invariant-violation, rounding-direction, overflow/underflow,
 share-price-manipulation style hypotheses. You're already strong here —
 don't spend disproportionate effort, this category is well-covered by the
 separate disprove.py pass anyway.
+
+## 7. Liveness / non-participation failures
+Distinct from category 1 (which is about an actor's action being
+adversarial). This category is about an actor's INACTION. For every
+function or role the protocol's security model implicitly depends on
+someone eventually calling — liquidate, settle, rebalance, harvest,
+update, redeem, report — ask: what happens if NOBODY calls it? Not "what
+if it's delayed," but what if it simply never becomes profitable enough
+for any permissionless actor to bother, or what if the conditions that
+would make it profitable never arise? Does the protocol silently assume
+continuous voluntary participation that nothing on-chain actually
+guarantees? A real example from this researcher's own prior work: a
+distribution mechanism assumed every data source would eventually report;
+the actual bug was what happens when one source simply never does. Also
+consider: can a permissionless actor benefit FROM others' non-participation
+(e.g. front of a queue that only grows because nobody clears it)?
 
 # Output format
 
@@ -98,8 +136,12 @@ a weak entry just to fill the slot). For each hypothesis:
 **[Category N] One-line title**
 - Precondition: what must be true / what must the attacker control (must
   be achievable by an arbitrary unprivileged address)
-- Mechanism: the specific sequence of calls/actions
+- Mechanism: the specific sequence of calls/actions (or, for category 7,
+  the specific absence of action and why nothing economically compels it)
 - Why the protocol might not defend against this: the assumption being violated
+- Likely severity if confirmed: critical / high / medium — be honest here;
+  don't inflate, but also don't generate a hypothesis you already suspect
+  is medium-at-best unless nothing better surfaced in that category
 - Confidence this survives basic scrutiny: low / medium / high (your gut
   read only — do not attempt to verify or disprove here, that's the next
   pass)

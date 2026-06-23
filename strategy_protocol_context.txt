@@ -1,0 +1,59 @@
+Origin Protocol — Three December 2025 In-Scope Strategies
+Target files: MorphoV2Strategy.sol, BaseCurveAMOStrategy.sol, CurveAMOStrategy.sol
+
+These three contracts were added to the Immunefi scope on 30 December 2025.
+They are less audited than the core Vault contracts and interact with VaultCore
+in ways that may not have been fully stress-tested.
+
+ARCHITECTURE:
+All three strategies sit between VaultCore and external DeFi protocols:
+- MorphoV2Strategy: deposits assets into Morpho V2 lending markets to earn yield.
+  Interacts with Morpho's ERC4626-compatible vault interface.
+- BaseCurveAMOStrategy: base contract for Curve AMO (Algorithmic Market Operations).
+  Mints/burns OTokens via VaultCore.mintForStrategy/burnForStrategy to provide
+  liquidity to Curve pools. This is the most complex — it has TWO-WAY interaction
+  with VaultCore, not just one-way deposits.
+- CurveAMOStrategy: extends BaseCurveAMOStrategy for specific Curve pool deployment.
+
+CRITICAL DISTINCTION FROM NORMAL STRATEGIES:
+Normal strategies (Aave, Morpho) only receive assets from the Vault and deposit
+them externally. AMO strategies additionally call back into the Vault:
+  - mintForStrategy(amount): mints OTokens without backing asset deposit
+  - burnForStrategy(amount): burns OTokens without asset withdrawal
+These functions are NOT protected by nonReentrant in VaultCore because AMO
+strategies are expected to call them. This is an explicitly documented assumption.
+
+KEY INTERFACES TO INVESTIGATE:
+- How does each strategy report its balance back to VaultCore (_checkBalance)?
+- What happens if a strategy's reported balance diverges from reality?
+- What are the preconditions for depositAll(), withdrawAll(), withdraw()?
+- Who can call harvest() on each strategy and what does it do with proceeds?
+- What external protocols does each strategy trust implicitly?
+
+HARD EXCLUSIONS (same as Vault run):
+- No hypotheses requiring Governor/Strategist/Operator to act maliciously.
+- No MEV/ordering attacks.
+- No oracle operator compromise.
+- Every hypothesis must be executable by an arbitrary unprivileged address.
+
+KNOWN ISSUES (already confirmed excluded):
+- The mint/burn AMO reentrancy path via defaultStrategy misconfiguration
+  (hypothesis 4.1 from the Vault run) — this requires governance misconfiguration.
+- maxSupplyDiff == 0 finding — killed by live on-chain state (3% on OETH, 5% on OUSD).
+- rebaseOptIn yield front-running — killed by _rebaseOptIn require guard.
+
+WHAT TO LOOK FOR SPECIFICALLY:
+The most valuable surface here is the AMO strategy's two-way VaultCore interaction.
+Focus on:
+1. Can a permissionless actor manipulate the Curve pool price/balance in a way that
+   causes mintForStrategy or burnForStrategy to mint/burn the wrong amount?
+2. Does _checkBalance in the AMO strategy correctly account for ALL assets
+   (both in the Curve pool and any held directly), especially at edge states?
+3. Is there a state where the AMO strategy's reported balance to VaultCore
+   diverges from its actual claimable balance, enabling over-minting or
+   under-backing of OTokens?
+4. What happens during withdrawAll() if the Curve pool has insufficient liquidity?
+   Can this permanently strand assets or prevent the vault from serving redemptions?
+5. For MorphoV2Strategy specifically: does it correctly handle the case where
+   Morpho's reported assets differ from actual claimable assets (e.g. during
+   bad debt socialization in Morpho markets)?
